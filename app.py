@@ -50,50 +50,57 @@ def upload_video():
             'message': 'Uploading file...'
         }
         
-        # Get form data safely
+        # Initialize defaults
+        source_lang = 'auto'
+        target_lang = 'en'
+        video_url = ''
+        
+        # Try to parse form data with comprehensive error handling
         try:
-            source_lang = request.form.get('source_lang', 'auto') if hasattr(request, 'form') else 'auto'
-            target_lang = request.form.get('target_lang', 'en') if hasattr(request, 'form') else 'en'  
-            video_url = request.form.get('video_url', '').strip() if hasattr(request, 'form') else ''
-            print(f"📝 Form data: source={source_lang}, target={target_lang}, url='{video_url[:50]}...'")
+            if request.content_type and 'multipart/form-data' in request.content_type:
+                source_lang = request.form.get('source_lang', 'auto')
+                target_lang = request.form.get('target_lang', 'en')
+                video_url = request.form.get('video_url', '').strip()
+                print(f"📝 Form data parsed: source={source_lang}, target={target_lang}")
         except Exception as form_error:
-            print(f"❌ Form parsing error: {form_error}")
-            # Use defaults if form parsing fails
-            source_lang = 'auto'
-            target_lang = 'en'
-            video_url = ''
+            print(f"⚠️ Form parsing failed, using defaults: {form_error}")
+            # Continue with defaults
+        
+        # Handle file upload with better error handling
+        uploaded_file = None
+        try:
+            if request.files and 'video_file' in request.files:
+                uploaded_file = request.files['video_file']
+        except Exception as file_error:
+            print(f"⚠️ File parsing failed: {file_error}")
         
         if video_url:
-            # Process video from URL
+            print(f"🌐 Processing video from URL: {video_url[:50]}...")
             threading.Thread(
                 target=process_video_from_url,
                 args=(job_id, video_url, source_lang, target_lang)
             ).start()
-        else:
-            # Process uploaded file
-            if 'video_file' not in request.files:
-                return jsonify({'error': 'No file selected'}), 400
-            
-            file = request.files['video_file']
-            if file.filename == '':
-                return jsonify({'error': 'No file selected'}), 400
-            
-            if file and file.filename and allowed_file(file.filename):
-                filename = secure_filename(file.filename)
+        elif uploaded_file and uploaded_file.filename and uploaded_file.filename != '':
+            print(f"📁 Processing uploaded file: {uploaded_file.filename}")
+            if allowed_file(uploaded_file.filename):
+                filename = secure_filename(uploaded_file.filename)
                 file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{job_id}_{filename}")
-                file.save(file_path)
+                uploaded_file.save(file_path)
                 
                 threading.Thread(
                     target=process_video_from_file,
                     args=(job_id, file_path, source_lang, target_lang)
                 ).start()
             else:
-                return jsonify({'error': 'Invalid file type'}), 400
+                return jsonify({'error': 'Invalid file type. Please upload MP4, AVI, MOV, MKV, WMV, FLV, or WebM files.'}), 400
+        else:
+            return jsonify({'error': 'Please select a file or provide a video URL'}), 400
         
         return jsonify({'job_id': job_id})
     
     except Exception as e:
         logger.error(f"Upload error: {str(e)}")
+        print(f"💥 Upload failed: {str(e)}")
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
 
 @app.route('/status/<job_id>')
