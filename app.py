@@ -1,6 +1,7 @@
 import os
 import logging
 from flask import Flask, render_template, request, jsonify, send_file, session
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
 import uuid
@@ -47,52 +48,45 @@ def upload_video():
         processing_status[job_id] = {
             'status': 'uploading',
             'progress': 0,
-            'message': 'Uploading file...'
+            'message': 'Processing upload...'
         }
         
-        # Use defaults - we'll parse manually if needed
-        source_lang = 'auto'
-        target_lang = 'en'
-        video_url = ''
-        
-        # Parse raw request data manually to avoid Flask form parsing issues
         content_type = request.headers.get('Content-Type', '')
         print(f"📋 Content-Type: {content_type}")
         
         if 'multipart/form-data' in content_type:
-            # Handle multipart form data manually
-            print("📁 Handling multipart file upload...")
+            # Handle file upload using Flask's built-in file handling
+            print("📁 Handling file upload...")
             
-            # Get raw data
-            raw_data = request.get_data()
-            print(f"📊 Raw data size: {len(raw_data)} bytes")
+            # Get form data
+            source_lang = request.form.get('source_lang', 'auto')
+            target_lang = request.form.get('target_lang', 'en')
             
-            # Save raw data to temporary file for processing
-            temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{job_id}_temp_upload.dat")
+            # Check if file was uploaded
+            if 'video_file' not in request.files:
+                return jsonify({'error': 'No video file uploaded'}), 400
             
-            with open(temp_file_path, 'wb') as temp_file:
-                temp_file.write(raw_data)
+            file = request.files['video_file']
+            if file.filename == '':
+                return jsonify({'error': 'No video file selected'}), 400
             
-            # Extract the actual video file from multipart data
-            try:
-                # Find video file boundaries in the multipart data
-                video_file_path = extract_video_from_multipart(raw_data, job_id)
+            if file and allowed_file(file.filename):
+                # Save uploaded file
+                filename = secure_filename(file.filename)
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{job_id}_{filename}")
                 
-                if video_file_path and os.path.exists(video_file_path):
-                    print(f"✅ Video file extracted: {video_file_path}")
-                    
-                    threading.Thread(
-                        target=process_video_from_file,
-                        args=(job_id, video_file_path, source_lang, target_lang)
-                    ).start()
-                else:
-                    return jsonify({'error': 'Failed to extract video file from upload'}), 400
-            
-            finally:
-                # Clean up temp file
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
-                    
+                # Save file directly without loading into memory
+                file.save(file_path)
+                print(f"✅ File saved: {file_path}")
+                
+                # Start processing in background
+                threading.Thread(
+                    target=process_video_from_file,
+                    args=(job_id, file_path, source_lang, target_lang)
+                ).start()
+            else:
+                return jsonify({'error': 'Invalid file type. Please upload a video file.'}), 400
+                
         elif 'application/json' in content_type:
             # Handle JSON data for URL processing
             print("🌐 Handling JSON URL request...")
@@ -123,57 +117,10 @@ def upload_video():
         print(f"💥 Upload failed: {str(e)}")
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
 
-def extract_video_from_multipart(raw_data, job_id):
-    """Extract video file from multipart form data manually"""
-    try:
-        import re
-        
-        # Convert to string for pattern matching
-        data_str = raw_data.decode('latin1', errors='ignore')
-        
-        # Find file boundaries
-        boundary_pattern = r'Content-Disposition: form-data; name="video_file"; filename="([^"]+)"'
-        filename_match = re.search(boundary_pattern, data_str)
-        
-        if not filename_match:
-            print("❌ No video file found in multipart data")
-            return None
-            
-        filename = filename_match.group(1)
-        print(f"📝 Found filename: {filename}")
-        
-        if not allowed_file(filename):
-            print(f"❌ File type not allowed: {filename}")
-            return None
-        
-        # Find the start of file content (after headers)
-        content_start = data_str.find('\r\n\r\n', filename_match.end())
-        if content_start == -1:
-            print("❌ Could not find file content start")
-            return None
-        content_start += 4  # Skip \r\n\r\n
-        
-        # Find the end of file content (next boundary)
-        boundary_end = data_str.find('\r\n------WebKitFormBoundary', content_start)
-        if boundary_end == -1:
-            boundary_end = len(data_str)
-        
-        # Extract file content
-        file_content = raw_data[content_start:boundary_end]
-        
-        # Save to file
-        secure_name = secure_filename(filename)
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{job_id}_{secure_name}")
-        
-        with open(file_path, 'wb') as video_file:
-            video_file.write(file_content)
-        
-        print(f"✅ Video file saved: {file_path} ({len(file_content)} bytes)")
-        return file_path
-        
-    except Exception as e:
-        print(f"❌ Multipart extraction error: {e}")
-        return None
+# Error handler for file too large
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return jsonify({'error': 'File too large. Maximum file size is 500MB.'}), 413
 
 @app.route('/status/<job_id>')
 def get_status(job_id):
