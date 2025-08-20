@@ -42,49 +42,92 @@ class SubtitleGenerator:
     def add_subtitles_to_video(self, video_path, segments, output_path):
         """Add subtitles directly to video using ffmpeg"""
         try:
-            # First create SRT file
-            srt_path = output_path.replace('.mp4', '.srt')
-            self.create_srt_file(segments, srt_path)
+            # First create SRT file in a temporary location
+            temp_srt_path = video_path.replace('.mov', '.srt').replace('.mp4', '.srt')
+            self.create_srt_file(segments, temp_srt_path)
+            
+            # Verify the SRT file was created and has content
+            if not os.path.exists(temp_srt_path):
+                raise Exception(f"SRT file was not created: {temp_srt_path}")
+            
+            if os.path.getsize(temp_srt_path) == 0:
+                raise Exception("SRT file is empty")
             
             # Use absolute paths to avoid path issues
             abs_video_path = os.path.abspath(video_path)
-            abs_srt_path = os.path.abspath(srt_path)
+            abs_srt_path = os.path.abspath(temp_srt_path)
             abs_output_path = os.path.abspath(output_path)
             
-            # Use a simpler ffmpeg command that should work more reliably
-            cmd = [
+            logger.info(f"Adding subtitles: video={abs_video_path}, srt={abs_srt_path}, output={abs_output_path}")
+            
+            # Try simpler approach first - drawtext filter for each subtitle segment
+            filter_parts = []
+            for i, segment in enumerate(segments):
+                start_time = segment['start_time']
+                end_time = segment['end_time']
+                text = segment['translated_text'].replace("'", "\\'").replace(":", "\\:")
+                
+                filter_parts.append(f"drawtext=text='{text}':fontcolor=white:fontsize=24:box=1:boxcolor=black@0.5:boxborderw=5:x=(w-text_w)/2:y=h-th-10:enable='between(t,{start_time},{end_time})'")
+            
+            if filter_parts:
+                video_filter = ",".join(filter_parts)
+                
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-i', abs_video_path,
+                    '-vf', video_filter,
+                    '-c:a', 'copy',
+                    abs_output_path
+                ]
+                
+                logger.info(f"Running ffmpeg command: {' '.join(cmd[:6])}...")  # Log first few parts only
+                
+                # Run command and capture output for debugging
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if result.returncode == 0:
+                    logger.info("Subtitles successfully embedded using drawtext")
+                    # Clean up temp SRT file
+                    if os.path.exists(temp_srt_path):
+                        os.remove(temp_srt_path)
+                    return output_path
+                else:
+                    logger.error(f"FFmpeg drawtext error: {result.stderr}")
+            
+            # Fallback: try with SRT file approach
+            cmd_srt = [
                 'ffmpeg', '-y',
                 '-i', abs_video_path,
-                '-vf', f"subtitles='{abs_srt_path}':force_style='Fontsize=24,PrimaryColour=&Hffffff&,OutlineColour=&H000000&,Outline=2'",
+                '-vf', f"subtitles={abs_srt_path}",
                 '-c:a', 'copy',
                 abs_output_path
             ]
             
-            # Run command and capture output for debugging
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd_srt, capture_output=True, text=True)
             
-            if result.returncode != 0:
-                logger.error(f"FFmpeg error: {result.stderr}")
-                # Try alternative approach - simple text overlay
+            if result.returncode == 0:
+                logger.info("Subtitles successfully embedded using SRT file")
+                # Clean up temp SRT file
+                if os.path.exists(temp_srt_path):
+                    os.remove(temp_srt_path)
+                return output_path
+            else:
+                logger.error(f"FFmpeg SRT error: {result.stderr}")
+                
+                # Final fallback - copy video without subtitles but keep SRT
                 cmd_simple = [
                     'ffmpeg', '-y',
                     '-i', abs_video_path,
-                    '-c:a', 'copy',
+                    '-c', 'copy',
                     abs_output_path
                 ]
                 subprocess.run(cmd_simple, capture_output=True, check=True)
-                # Keep the SRT file alongside the video for manual use
-                logger.warning("Subtitle overlay failed, created video without embedded subtitles")
-            else:
-                # Clean up SRT file only if embedding succeeded
-                if os.path.exists(srt_path):
-                    os.remove(srt_path)
-            
-            return output_path
+                logger.warning("Created video without embedded subtitles, SRT file available separately")
+                return output_path
             
         except Exception as e:
             logger.error(f"Subtitle overlay error: {str(e)}")
-            # Fallback: just copy the original video
+            # Final fallback: just copy the original video
             try:
                 cmd_fallback = ['ffmpeg', '-y', '-i', video_path, '-c', 'copy', output_path]
                 subprocess.run(cmd_fallback, capture_output=True, check=True)
