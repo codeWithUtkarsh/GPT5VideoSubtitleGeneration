@@ -83,7 +83,7 @@ class VideoProcessor:
                     audio_data = self.recognizer.record(source)  # read the entire audio file
                 
                 # Recognize using Google Web Speech API (needs internet)
-                text = self.recognizer.recognize_google(audio_data)
+                text = self.recognizer.recognize_google(audio_data, language='en-US')
                 
                 print(f"✅ SIMPLE EXTRACTION SUCCESS!")
                 print(f"📝 EXTRACTED TEXT: '{text}'")
@@ -148,7 +148,7 @@ class VideoProcessor:
                     # Use your simple approach for each segment
                     with sr.AudioFile(segment_path) as source:
                         audio_data = self.recognizer.record(source)
-                        text = self.recognizer.recognize_google(audio_data)
+                        text = self.recognizer.recognize_google(audio_data, language='en-US')
                     
                     print(f"✅ SEGMENT {i+1} TEXT: '{text}'")
                     

@@ -42,6 +42,7 @@ def index():
 @app.route('/upload', methods=['POST'])
 def upload_video():
     try:
+        print("🚀 Upload request received")
         job_id = str(uuid.uuid4())
         processing_status[job_id] = {
             'status': 'uploading',
@@ -49,10 +50,18 @@ def upload_video():
             'message': 'Uploading file...'
         }
         
-        # Get form data
-        source_lang = request.form.get('source_lang', 'auto')
-        target_lang = request.form.get('target_lang', 'en')
-        video_url = request.form.get('video_url', '').strip()
+        # Get form data safely
+        try:
+            source_lang = request.form.get('source_lang', 'auto') if hasattr(request, 'form') else 'auto'
+            target_lang = request.form.get('target_lang', 'en') if hasattr(request, 'form') else 'en'  
+            video_url = request.form.get('video_url', '').strip() if hasattr(request, 'form') else ''
+            print(f"📝 Form data: source={source_lang}, target={target_lang}, url='{video_url[:50]}...'")
+        except Exception as form_error:
+            print(f"❌ Form parsing error: {form_error}")
+            # Use defaults if form parsing fails
+            source_lang = 'auto'
+            target_lang = 'en'
+            video_url = ''
         
         if video_url:
             # Process video from URL
