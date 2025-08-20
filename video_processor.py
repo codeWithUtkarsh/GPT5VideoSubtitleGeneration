@@ -72,33 +72,57 @@ class VideoProcessor:
     def extract_speech_segments(self, audio_path):
         """Extract speech segments with timing information"""
         try:
+            print(f"🎤 STARTING SPEECH EXTRACTION FROM: {audio_path}")
             logger.info(f"Starting speech recognition on: {audio_path}")
+            
+            # First try: Simple approach - process entire audio file
+            print("🔍 TRYING SIMPLE APPROACH: Processing entire audio file...")
+            try:
+                with sr.AudioFile(audio_path) as source:
+                    audio_data = self.recognizer.record(source)
+                    text = self.recognizer.recognize_google(audio_data)
+                
+                print(f"✅ SIMPLE EXTRACTION SUCCESS!")
+                print(f"📝 EXTRACTED TEXT: '{text}'")
+                
+                # Get audio duration for timing
+                audio_segment = AudioSegment.from_wav(audio_path)
+                duration = len(audio_segment) / 1000  # Convert to seconds
+                
+                speech_segments = [{
+                    'start_time': 0.0,
+                    'end_time': duration,
+                    'text': text.strip()
+                }]
+                
+                print(f"📊 CREATED 1 SEGMENT: 0.0s-{duration:.2f}s")
+                return speech_segments
+                
+            except sr.UnknownValueError:
+                print("❌ SIMPLE APPROACH FAILED: No speech detected in full audio")
+            except sr.RequestError as e:
+                print(f"❌ SIMPLE APPROACH ERROR: {e}")
+            
+            # Fallback: Segment-based approach
+            print("🔄 TRYING SEGMENT-BASED APPROACH...")
             
             # Load audio file
             audio = AudioSegment.from_wav(audio_path)
-            logger.info(f"Audio loaded: {len(audio)}ms duration, {audio.frame_rate}Hz, {audio.dBFS}dBFS")
-            
-            # If audio is very quiet, adjust the silence threshold
-            if audio.dBFS < -40:
-                silence_thresh = audio.dBFS - 8  # More sensitive for quiet audio
-            else:
-                silence_thresh = audio.dBFS - 14
-            
-            logger.info(f"Using silence threshold: {silence_thresh}dBFS")
+            print(f"📊 AUDIO INFO: {len(audio)}ms duration, {audio.frame_rate}Hz, {audio.dBFS:.1f}dBFS")
             
             # Split on silence to get segments
             segments = split_on_silence(
                 audio,
-                min_silence_len=500,   # Reduced to 0.5 seconds
-                silence_thresh=silence_thresh,
+                min_silence_len=500,   # 0.5 seconds
+                silence_thresh=audio.dBFS - 12,
                 keep_silence=300  # Keep 300ms of silence
             )
             
-            logger.info(f"Audio split into {len(segments)} segments")
+            print(f"📈 AUDIO SPLIT INTO {len(segments)} SEGMENTS")
             
             # If no segments found, treat the whole audio as one segment
             if not segments:
-                logger.info("No silence-based segments found, using entire audio")
+                print("⚠️ NO SEGMENTS FOUND, USING ENTIRE AUDIO")
                 segments = [audio]
             
             speech_segments = []
@@ -106,39 +130,39 @@ class VideoProcessor:
             
             for i, segment in enumerate(segments):
                 # Skip very short segments
-                if len(segment) < 500:  # Less than 0.5 seconds
+                if len(segment) < 300:  # Less than 0.3 seconds
                     current_time += len(segment)
                     continue
-                    
-                logger.info(f"Processing segment {i+1}/{len(segments)}: {len(segment)}ms")
+                
+                print(f"🔍 PROCESSING SEGMENT {i+1}/{len(segments)}: {len(segment)}ms")
                 
                 # Export segment to temporary file for recognition
                 segment_path = f"temp_segment_{i}.wav"
                 segment.export(segment_path, format="wav")
                 
                 try:
-                    # Recognize speech in segment
+                    # Use the simple approach for each segment
                     with sr.AudioFile(segment_path) as source:
-                        # Adjust for ambient noise
-                        self.recognizer.adjust_for_ambient_noise(source, duration=0.2)
                         audio_data = self.recognizer.record(source)
                         text = self.recognizer.recognize_google(audio_data)
                     
-                    logger.info(f"Segment {i+1} recognized: '{text}'")
+                    print(f"✅ SEGMENT {i+1} TEXT: '{text}'")
                     
                     if text.strip():
-                        speech_segments.append({
+                        segment_info = {
                             'start_time': current_time / 1000,  # Convert to seconds
                             'end_time': (current_time + len(segment)) / 1000,
                             'text': text.strip()
-                        })
+                        }
+                        speech_segments.append(segment_info)
+                        print(f"💾 SAVED SEGMENT: {segment_info['start_time']:.2f}s-{segment_info['end_time']:.2f}s")
                 
                 except sr.UnknownValueError:
-                    logger.info(f"Segment {i+1}: No speech recognized")
+                    print(f"❌ SEGMENT {i+1}: No speech recognized")
                 except sr.RequestError as e:
-                    logger.error(f"Speech recognition request error for segment {i+1}: {e}")
+                    print(f"❌ SEGMENT {i+1} ERROR: {e}")
                 except Exception as e:
-                    logger.error(f"Error processing segment {i+1}: {e}")
+                    print(f"❌ SEGMENT {i+1} EXCEPTION: {e}")
                 
                 finally:
                     # Clean up temporary file
@@ -147,12 +171,13 @@ class VideoProcessor:
                 
                 current_time += len(segment)
             
-            logger.info(f"Total speech segments extracted: {len(speech_segments)}")
+            print(f"🎯 FINAL RESULT: {len(speech_segments)} speech segments extracted")
             for i, seg in enumerate(speech_segments):
-                logger.info(f"Segment {i+1}: {seg['start_time']:.2f}s-{seg['end_time']:.2f}s: '{seg['text'][:50]}...'")
+                print(f"📋 SEGMENT {i+1}: {seg['start_time']:.2f}s-{seg['end_time']:.2f}s = '{seg['text']}'")
             
             return speech_segments
             
         except Exception as e:
+            print(f"💥 SPEECH EXTRACTION FAILED: {str(e)}")
             logger.error(f"Speech extraction error: {str(e)}")
             raise Exception(f"Failed to extract speech segments: {str(e)}")

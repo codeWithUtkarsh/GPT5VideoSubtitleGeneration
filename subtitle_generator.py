@@ -13,12 +13,18 @@ class SubtitleGenerator:
     def create_srt_file(self, segments, output_path):
         """Create SRT subtitle file"""
         try:
+            print(f"📄 CREATING SRT FILE: {output_path}")
+            print(f"📊 PROCESSING {len(segments)} SUBTITLE SEGMENTS:")
+            
             subtitles = []
             
             for i, segment in enumerate(segments, 1):
                 start_time = timedelta(seconds=segment['start_time'])
                 end_time = timedelta(seconds=segment['end_time'])
                 text = segment['translated_text']
+                
+                print(f"   🎬 SUBTITLE {i}: {start_time} --> {end_time}")
+                print(f"       💬 TEXT: '{text}'")
                 
                 subtitle = srt.Subtitle(
                     index=i,
@@ -30,12 +36,19 @@ class SubtitleGenerator:
             
             srt_content = srt.compose(subtitles)
             
+            print(f"📝 SRT CONTENT PREVIEW:")
+            print(f"{'='*50}")
+            print(srt_content[:200] + "..." if len(srt_content) > 200 else srt_content)
+            print(f"{'='*50}")
+            
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(srt_content)
             
+            print(f"✅ SRT FILE SAVED: {output_path} ({len(srt_content)} characters)")
             return output_path
             
         except Exception as e:
+            print(f"💥 SRT CREATION FAILED: {str(e)}")
             logger.error(f"SRT creation error: {str(e)}")
             raise Exception(f"Failed to create SRT file: {str(e)}")
     

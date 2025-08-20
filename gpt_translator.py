@@ -16,15 +16,19 @@ class GPTTranslator:
     def translate_segments(self, segments, source_lang, target_lang):
         """Translate all speech segments"""
         try:
+            print(f"🌍 STARTING TRANSLATION: {len(segments)} segments from {source_lang} to {target_lang}")
             logger.info(f"Starting translation of {len(segments)} segments from {source_lang} to {target_lang}")
             
             if not segments:
+                print("❌ NO SEGMENTS TO TRANSLATE!")
                 logger.warning("No segments to translate!")
                 return []
             
             translated_segments = []
             
             for i, segment in enumerate(segments):
+                print(f"🔤 TRANSLATING SEGMENT {i+1}/{len(segments)}:")
+                print(f"   📥 ORIGINAL: '{segment['text']}'")
                 logger.info(f"Translating segment {i+1}: '{segment['text'][:50]}...'")
                 
                 translated_text = self.translate_text(
@@ -33,19 +37,25 @@ class GPTTranslator:
                     target_lang
                 )
                 
+                print(f"   📤 TRANSLATED: '{translated_text}'")
+                print(f"   ⏱️  TIMING: {segment['start_time']:.2f}s - {segment['end_time']:.2f}s")
                 logger.info(f"Translation result: '{translated_text[:50]}...'")
                 
-                translated_segments.append({
+                translated_segment = {
                     'start_time': segment['start_time'],
                     'end_time': segment['end_time'],
                     'original_text': segment['text'],
                     'translated_text': translated_text
-                })
+                }
+                translated_segments.append(translated_segment)
+                print(f"   ✅ SEGMENT {i+1} COMPLETE")
             
+            print(f"🎯 TRANSLATION COMPLETE: {len(translated_segments)} segments successfully translated")
             logger.info(f"Successfully translated {len(translated_segments)} segments")
             return translated_segments
             
         except Exception as e:
+            print(f"💥 TRANSLATION FAILED: {str(e)}")
             logger.error(f"Translation error: {str(e)}")
             raise Exception(f"Failed to translate segments: {str(e)}")
     
