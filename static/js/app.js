@@ -94,27 +94,43 @@ class VideoTranslatorApp {
             // Show loading state
             this.showLoadingState();
 
-            // Prepare form data
-            const formData = new FormData();
+            // Get form values
             const videoSource = document.querySelector('input[name="videoSource"]:checked').value;
+            const sourceLang = document.getElementById('sourceLang').value;
+            const targetLang = document.getElementById('targetLang').value;
             
-            formData.append('source_lang', document.getElementById('sourceLang').value);
-            formData.append('target_lang', document.getElementById('targetLang').value);
+            let response;
 
             if (videoSource === 'file') {
+                // Handle file upload with multipart form data
                 const fileInput = document.getElementById('videoFile');
-                if (fileInput.files[0]) {
-                    formData.append('video_file', fileInput.files[0]);
-                }
-            } else {
-                formData.append('video_url', document.getElementById('videoUrl').value);
-            }
+                const videoFile = fileInput.files[0];
+                
+                const formData = new FormData();
+                formData.append('video_file', videoFile);
+                formData.append('source_lang', sourceLang);
+                formData.append('target_lang', targetLang);
 
-            // Submit form
-            const response = await fetch('/upload', {
-                method: 'POST',
-                body: formData
-            });
+                response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+            } else {
+                // Handle URL with JSON
+                const videoUrl = document.getElementById('videoUrl').value.trim();
+                
+                response = await fetch('/upload', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        video_url: videoUrl,
+                        source_lang: sourceLang,
+                        target_lang: targetLang
+                    })
+                });
+            }
 
             const result = await response.json();
 

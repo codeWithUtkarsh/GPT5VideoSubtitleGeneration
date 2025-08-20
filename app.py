@@ -50,51 +50,71 @@ def upload_video():
             'message': 'Uploading file...'
         }
         
-        # Initialize defaults
+        # Use defaults - we'll parse manually if needed
         source_lang = 'auto'
         target_lang = 'en'
         video_url = ''
         
-        # Try to parse form data with comprehensive error handling
-        try:
-            if request.content_type and 'multipart/form-data' in request.content_type:
-                source_lang = request.form.get('source_lang', 'auto')
-                target_lang = request.form.get('target_lang', 'en')
-                video_url = request.form.get('video_url', '').strip()
-                print(f"📝 Form data parsed: source={source_lang}, target={target_lang}")
-        except Exception as form_error:
-            print(f"⚠️ Form parsing failed, using defaults: {form_error}")
-            # Continue with defaults
+        # Parse raw request data manually to avoid Flask form parsing issues
+        content_type = request.headers.get('Content-Type', '')
+        print(f"📋 Content-Type: {content_type}")
         
-        # Handle file upload with better error handling
-        uploaded_file = None
-        try:
-            if request.files and 'video_file' in request.files:
-                uploaded_file = request.files['video_file']
-        except Exception as file_error:
-            print(f"⚠️ File parsing failed: {file_error}")
-        
-        if video_url:
-            print(f"🌐 Processing video from URL: {video_url[:50]}...")
-            threading.Thread(
-                target=process_video_from_url,
-                args=(job_id, video_url, source_lang, target_lang)
-            ).start()
-        elif uploaded_file and uploaded_file.filename and uploaded_file.filename != '':
-            print(f"📁 Processing uploaded file: {uploaded_file.filename}")
-            if allowed_file(uploaded_file.filename):
-                filename = secure_filename(uploaded_file.filename)
-                file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{job_id}_{filename}")
-                uploaded_file.save(file_path)
+        if 'multipart/form-data' in content_type:
+            # Handle multipart form data manually
+            print("📁 Handling multipart file upload...")
+            
+            # Get raw data
+            raw_data = request.get_data()
+            print(f"📊 Raw data size: {len(raw_data)} bytes")
+            
+            # Save raw data to temporary file for processing
+            temp_file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{job_id}_temp_upload.dat")
+            
+            with open(temp_file_path, 'wb') as temp_file:
+                temp_file.write(raw_data)
+            
+            # Extract the actual video file from multipart data
+            try:
+                # Find video file boundaries in the multipart data
+                video_file_path = extract_video_from_multipart(raw_data, job_id)
                 
-                threading.Thread(
-                    target=process_video_from_file,
-                    args=(job_id, file_path, source_lang, target_lang)
-                ).start()
-            else:
-                return jsonify({'error': 'Invalid file type. Please upload MP4, AVI, MOV, MKV, WMV, FLV, or WebM files.'}), 400
+                if video_file_path and os.path.exists(video_file_path):
+                    print(f"✅ Video file extracted: {video_file_path}")
+                    
+                    threading.Thread(
+                        target=process_video_from_file,
+                        args=(job_id, video_file_path, source_lang, target_lang)
+                    ).start()
+                else:
+                    return jsonify({'error': 'Failed to extract video file from upload'}), 400
+            
+            finally:
+                # Clean up temp file
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+                    
+        elif 'application/json' in content_type:
+            # Handle JSON data for URL processing
+            print("🌐 Handling JSON URL request...")
+            try:
+                json_data = request.get_json()
+                video_url = json_data.get('video_url', '').strip()
+                source_lang = json_data.get('source_lang', 'auto')
+                target_lang = json_data.get('target_lang', 'en')
+                
+                if video_url:
+                    print(f"🔗 Processing URL: {video_url[:50]}...")
+                    threading.Thread(
+                        target=process_video_from_url,
+                        args=(job_id, video_url, source_lang, target_lang)
+                    ).start()
+                else:
+                    return jsonify({'error': 'No video URL provided'}), 400
+            except Exception as json_error:
+                print(f"❌ JSON parsing error: {json_error}")
+                return jsonify({'error': 'Invalid JSON data'}), 400
         else:
-            return jsonify({'error': 'Please select a file or provide a video URL'}), 400
+            return jsonify({'error': 'Unsupported content type'}), 400
         
         return jsonify({'job_id': job_id})
     
@@ -102,6 +122,58 @@ def upload_video():
         logger.error(f"Upload error: {str(e)}")
         print(f"💥 Upload failed: {str(e)}")
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+
+def extract_video_from_multipart(raw_data, job_id):
+    """Extract video file from multipart form data manually"""
+    try:
+        import re
+        
+        # Convert to string for pattern matching
+        data_str = raw_data.decode('latin1', errors='ignore')
+        
+        # Find file boundaries
+        boundary_pattern = r'Content-Disposition: form-data; name="video_file"; filename="([^"]+)"'
+        filename_match = re.search(boundary_pattern, data_str)
+        
+        if not filename_match:
+            print("❌ No video file found in multipart data")
+            return None
+            
+        filename = filename_match.group(1)
+        print(f"📝 Found filename: {filename}")
+        
+        if not allowed_file(filename):
+            print(f"❌ File type not allowed: {filename}")
+            return None
+        
+        # Find the start of file content (after headers)
+        content_start = data_str.find('\r\n\r\n', filename_match.end())
+        if content_start == -1:
+            print("❌ Could not find file content start")
+            return None
+        content_start += 4  # Skip \r\n\r\n
+        
+        # Find the end of file content (next boundary)
+        boundary_end = data_str.find('\r\n------WebKitFormBoundary', content_start)
+        if boundary_end == -1:
+            boundary_end = len(data_str)
+        
+        # Extract file content
+        file_content = raw_data[content_start:boundary_end]
+        
+        # Save to file
+        secure_name = secure_filename(filename)
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{job_id}_{secure_name}")
+        
+        with open(file_path, 'wb') as video_file:
+            video_file.write(file_content)
+        
+        print(f"✅ Video file saved: {file_path} ({len(file_content)} bytes)")
+        return file_path
+        
+    except Exception as e:
+        print(f"❌ Multipart extraction error: {e}")
+        return None
 
 @app.route('/status/<job_id>')
 def get_status(job_id):
