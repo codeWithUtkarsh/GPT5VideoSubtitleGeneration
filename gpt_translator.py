@@ -16,14 +16,24 @@ class GPTTranslator:
     def translate_segments(self, segments, source_lang, target_lang):
         """Translate all speech segments"""
         try:
+            logger.info(f"Starting translation of {len(segments)} segments from {source_lang} to {target_lang}")
+            
+            if not segments:
+                logger.warning("No segments to translate!")
+                return []
+            
             translated_segments = []
             
-            for segment in segments:
+            for i, segment in enumerate(segments):
+                logger.info(f"Translating segment {i+1}: '{segment['text'][:50]}...'")
+                
                 translated_text = self.translate_text(
                     segment['text'], 
                     source_lang, 
                     target_lang
                 )
+                
+                logger.info(f"Translation result: '{translated_text[:50]}...'")
                 
                 translated_segments.append({
                     'start_time': segment['start_time'],
@@ -32,6 +42,7 @@ class GPTTranslator:
                     'translated_text': translated_text
                 })
             
+            logger.info(f"Successfully translated {len(translated_segments)} segments")
             return translated_segments
             
         except Exception as e:

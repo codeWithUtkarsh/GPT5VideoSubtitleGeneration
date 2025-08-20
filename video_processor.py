@@ -72,21 +72,46 @@ class VideoProcessor:
     def extract_speech_segments(self, audio_path):
         """Extract speech segments with timing information"""
         try:
+            logger.info(f"Starting speech recognition on: {audio_path}")
+            
             # Load audio file
             audio = AudioSegment.from_wav(audio_path)
+            logger.info(f"Audio loaded: {len(audio)}ms duration, {audio.frame_rate}Hz, {audio.dBFS}dBFS")
+            
+            # If audio is very quiet, adjust the silence threshold
+            if audio.dBFS < -40:
+                silence_thresh = audio.dBFS - 8  # More sensitive for quiet audio
+            else:
+                silence_thresh = audio.dBFS - 14
+            
+            logger.info(f"Using silence threshold: {silence_thresh}dBFS")
             
             # Split on silence to get segments
             segments = split_on_silence(
                 audio,
-                min_silence_len=1000,  # 1 second of silence
-                silence_thresh=audio.dBFS - 14,
-                keep_silence=500  # Keep 500ms of silence
+                min_silence_len=500,   # Reduced to 0.5 seconds
+                silence_thresh=silence_thresh,
+                keep_silence=300  # Keep 300ms of silence
             )
+            
+            logger.info(f"Audio split into {len(segments)} segments")
+            
+            # If no segments found, treat the whole audio as one segment
+            if not segments:
+                logger.info("No silence-based segments found, using entire audio")
+                segments = [audio]
             
             speech_segments = []
             current_time = 0
             
             for i, segment in enumerate(segments):
+                # Skip very short segments
+                if len(segment) < 500:  # Less than 0.5 seconds
+                    current_time += len(segment)
+                    continue
+                    
+                logger.info(f"Processing segment {i+1}/{len(segments)}: {len(segment)}ms")
+                
                 # Export segment to temporary file for recognition
                 segment_path = f"temp_segment_{i}.wav"
                 segment.export(segment_path, format="wav")
@@ -94,8 +119,12 @@ class VideoProcessor:
                 try:
                     # Recognize speech in segment
                     with sr.AudioFile(segment_path) as source:
+                        # Adjust for ambient noise
+                        self.recognizer.adjust_for_ambient_noise(source, duration=0.2)
                         audio_data = self.recognizer.record(source)
                         text = self.recognizer.recognize_google(audio_data)
+                    
+                    logger.info(f"Segment {i+1} recognized: '{text}'")
                     
                     if text.strip():
                         speech_segments.append({
@@ -105,10 +134,11 @@ class VideoProcessor:
                         })
                 
                 except sr.UnknownValueError:
-                    # Speech not recognized, skip this segment
-                    pass
+                    logger.info(f"Segment {i+1}: No speech recognized")
                 except sr.RequestError as e:
-                    logger.warning(f"Speech recognition request error: {e}")
+                    logger.error(f"Speech recognition request error for segment {i+1}: {e}")
+                except Exception as e:
+                    logger.error(f"Error processing segment {i+1}: {e}")
                 
                 finally:
                     # Clean up temporary file
@@ -116,6 +146,10 @@ class VideoProcessor:
                         os.remove(segment_path)
                 
                 current_time += len(segment)
+            
+            logger.info(f"Total speech segments extracted: {len(speech_segments)}")
+            for i, seg in enumerate(speech_segments):
+                logger.info(f"Segment {i+1}: {seg['start_time']:.2f}s-{seg['end_time']:.2f}s: '{seg['text'][:50]}...'")
             
             return speech_segments
             
