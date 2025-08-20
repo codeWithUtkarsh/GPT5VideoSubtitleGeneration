@@ -6,12 +6,17 @@ import speech_recognition as sr
 from pydub import AudioSegment
 from pydub.silence import split_on_silence
 import yt_dlp
+import whisper
 
 logger = logging.getLogger(__name__)
 
 class VideoProcessor:
     def __init__(self):
         self.recognizer = sr.Recognizer()
+        # Load Whisper model (more accurate than Google Speech Recognition)
+        print("🤖 Loading Whisper AI model for speech recognition...")
+        self.whisper_model = whisper.load_model("base")
+        print("✅ Whisper model loaded successfully!")
     
     def download_video(self, url, output_dir, job_id):
         """Download video from URL using yt-dlp"""
@@ -70,20 +75,62 @@ class VideoProcessor:
             raise Exception(f"Failed to extract audio: {str(e)}")
     
     def extract_speech_segments(self, audio_path):
-        """Extract speech segments with timing information"""
+        """Extract speech segments with timing information using Whisper AI"""
         try:
             print(f"🎤 STARTING SPEECH EXTRACTION FROM: {audio_path}")
             logger.info(f"Starting speech recognition on: {audio_path}")
             
-            # First try: Simple approach - process entire audio file
-            print("🔍 TRYING SIMPLE APPROACH: Processing entire audio file...")
+            # Method 1: OpenAI Whisper (Most Accurate)
+            print("🤖 TRYING WHISPER AI: Most accurate speech recognition...")
+            try:
+                result = self.whisper_model.transcribe(audio_path, word_timestamps=True)
+                
+                print(f"✅ WHISPER SUCCESS!")
+                print(f"📝 WHISPER DETECTED TEXT: '{result['text']}'")
+                print(f"🌐 WHISPER DETECTED LANGUAGE: {result.get('language', 'unknown')}")
+                
+                # Extract segments with timing from Whisper
+                speech_segments = []
+                
+                if 'segments' in result:
+                    for i, segment in enumerate(result['segments']):
+                        text = segment['text'].strip()
+                        if text:
+                            segment_info = {
+                                'start_time': segment['start'],
+                                'end_time': segment['end'], 
+                                'text': text
+                            }
+                            speech_segments.append(segment_info)
+                            print(f"📋 WHISPER SEGMENT {i+1}: {segment_info['start_time']:.2f}s-{segment_info['end_time']:.2f}s = '{text}'")
+                else:
+                    # Fallback: Use entire text with audio duration
+                    audio_segment = AudioSegment.from_wav(audio_path)
+                    duration = len(audio_segment) / 1000
+                    
+                    speech_segments = [{
+                        'start_time': 0.0,
+                        'end_time': duration,
+                        'text': result['text'].strip()
+                    }]
+                    print(f"📊 WHISPER SINGLE SEGMENT: 0.0s-{duration:.2f}s")
+                
+                if speech_segments:
+                    print(f"🎯 WHISPER SUCCESS: {len(speech_segments)} segments extracted")
+                    return speech_segments
+                
+            except Exception as e:
+                print(f"❌ WHISPER FAILED: {str(e)}")
+            
+            # Method 2: Google Speech Recognition (Fallback)
+            print("🔍 TRYING GOOGLE SPEECH API: Fallback method...")
             try:
                 with sr.AudioFile(audio_path) as source:
                     audio_data = self.recognizer.record(source)
                     text = self.recognizer.recognize_google(audio_data)
                 
-                print(f"✅ SIMPLE EXTRACTION SUCCESS!")
-                print(f"📝 EXTRACTED TEXT: '{text}'")
+                print(f"✅ GOOGLE SPEECH SUCCESS!")
+                print(f"📝 GOOGLE EXTRACTED TEXT: '{text}'")
                 
                 # Get audio duration for timing
                 audio_segment = AudioSegment.from_wav(audio_path)
@@ -95,16 +142,16 @@ class VideoProcessor:
                     'text': text.strip()
                 }]
                 
-                print(f"📊 CREATED 1 SEGMENT: 0.0s-{duration:.2f}s")
+                print(f"📊 GOOGLE SEGMENT: 0.0s-{duration:.2f}s")
                 return speech_segments
                 
             except sr.UnknownValueError:
-                print("❌ SIMPLE APPROACH FAILED: No speech detected in full audio")
+                print("❌ GOOGLE SPEECH FAILED: No speech detected")
             except sr.RequestError as e:
-                print(f"❌ SIMPLE APPROACH ERROR: {e}")
+                print(f"❌ GOOGLE SPEECH ERROR: {e}")
             
-            # Fallback: Segment-based approach
-            print("🔄 TRYING SEGMENT-BASED APPROACH...")
+            # Method 3: Segment-based approach with Google (Final fallback)
+            print("🔄 TRYING SEGMENT-BASED GOOGLE SPEECH: Final attempt...")
             
             # Load audio file
             audio = AudioSegment.from_wav(audio_path)
@@ -113,9 +160,9 @@ class VideoProcessor:
             # Split on silence to get segments
             segments = split_on_silence(
                 audio,
-                min_silence_len=500,   # 0.5 seconds
-                silence_thresh=audio.dBFS - 12,
-                keep_silence=300  # Keep 300ms of silence
+                min_silence_len=300,   # 0.3 seconds
+                silence_thresh=audio.dBFS - 10,
+                keep_silence=200  # Keep 200ms of silence
             )
             
             print(f"📈 AUDIO SPLIT INTO {len(segments)} SEGMENTS")
@@ -130,7 +177,7 @@ class VideoProcessor:
             
             for i, segment in enumerate(segments):
                 # Skip very short segments
-                if len(segment) < 300:  # Less than 0.3 seconds
+                if len(segment) < 200:  # Less than 0.2 seconds
                     current_time += len(segment)
                     continue
                 
@@ -141,7 +188,6 @@ class VideoProcessor:
                 segment.export(segment_path, format="wav")
                 
                 try:
-                    # Use the simple approach for each segment
                     with sr.AudioFile(segment_path) as source:
                         audio_data = self.recognizer.record(source)
                         text = self.recognizer.recognize_google(audio_data)
