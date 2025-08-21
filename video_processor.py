@@ -69,39 +69,66 @@ class VideoProcessor:
             raise Exception(f"Failed to extract audio: {str(e)}")
     
     def extract_speech_segments(self, audio_path):
-        """Extract speech segments using OpenAI API for transcription"""
+        """Extract speech segments using SpeechRecognition with Google Speech API"""
         try:
             print(f"🎤 STARTING SPEECH EXTRACTION FROM: {audio_path}")
             logger.info(f"Starting speech recognition on: {audio_path}")
             
-            # Use OpenAI's audio transcription API (much more reliable)
-            print("🤖 USING OPENAI WHISPER API: Most reliable transcription...")
+            # Use SpeechRecognition library for transcription
+            print("🤖 USING SPEECH RECOGNITION: Processing audio...")
             
             try:
-                # Import OpenAI client
-                from openai import OpenAI
+                import speech_recognition as sr
                 
-                # Initialize OpenAI client
-                openai_client = OpenAI(
-                    base_url="https://api.aimlapi.com/v1",
-                    api_key=os.environ.get("OPENAI_API_KEY")
-                )
+                # Initialize recognizer
+                recognizer = sr.Recognizer()
                 
-                # Read the audio file
-                with open(audio_path, 'rb') as audio_file:
-                    transcription = openai_client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=audio_file,
-                        response_format="json"
-                    )
+                # Load the audio file
+                print("📥 Loading audio file...")
+                with sr.AudioFile(audio_path) as source:
+                    # Adjust for ambient noise
+                    recognizer.adjust_for_ambient_noise(source, duration=1)
+                    
+                    # Record the audio data
+                    audio_data = recognizer.record(source)
                 
-                text = transcription.text.strip()
-                print(f"✅ OPENAI TRANSCRIPTION SUCCESS!")
+                # Recognize speech using Google Speech Recognition
+                print("🎯 Starting transcription with Google Speech API...")
+                text = recognizer.recognize_google(audio_data)
+                
+                print(f"✅ SPEECH RECOGNITION SUCCESS!")
                 print(f"📝 EXTRACTED TEXT: '{text}'")
                 
                 # Get audio duration for timing
                 audio_segment = AudioSegment.from_wav(audio_path)
                 duration = len(audio_segment) / 1000  # Convert to seconds
+                
+                # Create single segment with extracted text
+                speech_segments = [{
+                    'start_time': 0.0,
+                    'end_time': duration,
+                    'text': text.strip()
+                }]
+                
+                print(f"📊 CREATED 1 SEGMENT: 0.0s-{duration:.2f}s")
+                print(f"🎯 SPEECH RECOGNITION SUCCESS: 1 segment extracted")
+                return speech_segments
+                
+            except Exception as e:
+                print(f"❌ SPEECH RECOGNITION FAILED: {str(e)}")
+                logger.error(f"Speech recognition error: {str(e)}")
+                
+                # Get audio duration for timing
+                audio_segment = AudioSegment.from_wav(audio_path)
+                duration = len(audio_segment) / 1000  # Convert to seconds
+                
+                # Create appropriate fallback message based on error type
+                if "UnknownValueError" in str(type(e)):
+                    text = "Audio detected but speech could not be recognized"
+                elif "RequestError" in str(type(e)):
+                    text = "Audio detected - Speech recognition service unavailable"
+                else:
+                    text = "Audio content detected - Speech recognition failed"
                 
                 speech_segments = [{
                     'start_time': 0.0,
@@ -109,42 +136,15 @@ class VideoProcessor:
                     'text': text
                 }]
                 
-                print(f"📊 CREATED 1 SEGMENT: 0.0s-{duration:.2f}s")
-                print(f"🎯 OPENAI API SUCCESS: 1 segment extracted")
+                print(f"📊 FALLBACK SEGMENT: 0.0s-{duration:.2f}s")
                 return speech_segments
                 
-            except Exception as openai_error:
-                print(f"❌ OPENAI API FAILED: {str(openai_error)}")
-            
-            # Fallback: Use ffmpeg with speech-to-text
-            print("🔄 TRYING FFMPEG + TEXT EXTRACTION: Fallback method...")
-            
-            try:
-                # Extract raw text using ffmpeg and a simple approach
-                # Convert audio to text format or extract any embedded text
-                text_content = "Speech detected but transcription not available"
-                
-                # Get audio duration for timing
-                audio_segment = AudioSegment.from_wav(audio_path)
-                duration = len(audio_segment) / 1000  # Convert to seconds
-                
-                print(f"📊 FFMPEG ANALYSIS: {duration:.2f}s duration detected")
-                
-                # Create a basic segment
-                speech_segments = [{
-                    'start_time': 0.0,
-                    'end_time': duration,
-                    'text': text_content
-                }]
-                
-                print(f"🎯 FALLBACK SUCCESS: 1 segment created")
-                return speech_segments
-                
-            except Exception as ffmpeg_error:
-                print(f"❌ FFMPEG FALLBACK FAILED: {str(ffmpeg_error)}")
+            except Exception as speech_error:
+                print(f"❌ SPEECH RECOGNITION FAILED: {str(speech_error)}")
+                logger.error(f"Speech recognition error: {str(speech_error)}")
             
             # Final fallback: Create a placeholder segment
-            print("⚠️ ALL METHODS FAILED: Creating placeholder segment...")
+            print("⚠️ SPEECH RECOGNITION FAILED: Creating placeholder segment...")
             
             try:
                 # Get audio duration for timing
@@ -154,7 +154,7 @@ class VideoProcessor:
                 speech_segments = [{
                     'start_time': 0.0,
                     'end_time': duration,
-                    'text': "Audio content detected - manual transcription may be needed"
+                    'text': "Audio content detected - Speech recognition failed"
                 }]
                 
                 print(f"📊 PLACEHOLDER SEGMENT: 0.0s-{duration:.2f}s")
