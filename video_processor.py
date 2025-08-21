@@ -94,7 +94,15 @@ class VideoProcessor:
                 
                 # Recognize speech using Google Speech Recognition
                 print("🎯 Starting transcription with Google Speech API...")
-                text = recognizer.recognize_google(audio_data)
+                try:
+                    text = recognizer.recognize_google(audio_data)
+                except AttributeError:
+                    # If recognize_google is not available, use a fallback
+                    print("🔄 Google Speech API not available, using offline recognition...")
+                    text = recognizer.recognize_sphinx(audio_data)
+                except:
+                    # If that also fails, create a fallback
+                    raise Exception("Speech recognition methods not available")
                 
                 print(f"✅ SPEECH RECOGNITION SUCCESS!")
                 print(f"📝 EXTRACTED TEXT: '{text}'")
@@ -138,10 +146,6 @@ class VideoProcessor:
                 
                 print(f"📊 FALLBACK SEGMENT: 0.0s-{duration:.2f}s")
                 return speech_segments
-                
-            except Exception as speech_error:
-                print(f"❌ SPEECH RECOGNITION FAILED: {str(speech_error)}")
-                logger.error(f"Speech recognition error: {str(speech_error)}")
             
             # Final fallback: Create a placeholder segment
             print("⚠️ SPEECH RECOGNITION FAILED: Creating placeholder segment...")

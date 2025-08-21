@@ -45,7 +45,8 @@ class GPTTranslator:
                     'start_time': segment['start_time'],
                     'end_time': segment['end_time'],
                     'original_text': segment['text'],
-                    'translated_text': translated_text
+                    'translated_text': translated_text,
+                    'text': translated_text  # Add this for compatibility with subtitle generator
                 }
                 translated_segments.append(translated_segment)
                 print(f"   ✅ SEGMENT {i+1} COMPLETE")
