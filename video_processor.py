@@ -5,7 +5,9 @@ import json
 from pydub import AudioSegment
 from pydub.silence import split_on_silence
 import yt_dlp
-import whisper
+import requests
+import time
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -71,91 +73,177 @@ class VideoProcessor:
             raise Exception(f"Failed to extract audio: {str(e)}")
 
     def extract_speech_segments(self, audio_path):
-        """Extract speech segments using OpenAI Whisper"""
+        """Extract speech segments using AIML API Whisper Large with intelligent segmentation"""
         try:
-            print(f"🎤 STARTING WHISPER TRANSCRIPTION FROM: {audio_path}")
-            logger.info(f"Starting Whisper transcription on: {audio_path}")
+            print(f"🎤 STARTING AIML WHISPER LARGE TRANSCRIPTION FROM: {audio_path}")
+            logger.info(f"Starting AIML Whisper Large transcription on: {audio_path}")
 
-            # Load Whisper model
-            print("🤖 LOADING WHISPER MODEL...")
-            try:
-                model = whisper.load_model("base")  # Using base model for balance of speed/accuracy
-                print("✅ WHISPER MODEL LOADED SUCCESSFULLY")
-            except Exception as model_error:
-                print(f"❌ FAILED TO LOAD WHISPER MODEL: {str(model_error)}")
-                raise Exception(f"Failed to load Whisper model: {str(model_error)}")
+            # AIML API configuration
+            base_url = "https://api.aimlapi.com/v1"
+            api_key = os.environ.get("AIMLAPI_KEY", "")
 
-            # Transcribe audio with Whisper
-            print("🎯 STARTING WHISPER TRANSCRIPTION...")
-            try:
-                result = model.transcribe(audio_path, verbose=True)
+            if not api_key:
+                raise Exception("AIMLAPI_KEY environment variable not set")
 
-                # Extract segments with timing
-                speech_segments = []
+            print("🤖 SENDING AUDIO TO AIML API...")
 
-                if 'segments' in result and result['segments']:
-                    print(f"📊 PROCESSING {len(result['segments'])} WHISPER SEGMENTS:")
-                    for i, segment in enumerate(result['segments']):
-                        start_time = segment.get('start', 0.0)
-                        end_time = segment.get('end', start_time + 1.0)
-                        text = segment.get('text', '').strip()
+            # Create STT task
+            def create_stt():
+                url = f"{base_url}/stt/create"
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                }
+                data = {
+                    "model": "#g1_whisper-large",
+                }
 
-                        if text:  # Only include non-empty segments
-                            speech_segments.append({
-                                'start_time': start_time,
-                                'end_time': end_time,
-                                'text': text
-                            })
-                            print(f"   🎬 SEGMENT {i+1}: {start_time:.2f}s-{end_time:.2f}s")
-                            print(f"       💬 TEXT: '{text}'")
+                with open(audio_path, "rb") as file:
+                    files = {"audio": (os.path.basename(audio_path), file, "audio/wav")}
+                    response = requests.post(url, data=data, headers=headers, files=files)
+
+                if response.status_code >= 400:
+                    print(f"Error: {response.status_code} - {response.text}")
+                    raise Exception(f"API Error: {response.status_code} - {response.text}")
                 else:
-                    # Fallback: use full text as single segment
-                    text = result.get('text', '').strip()
-                    if text:
-                        # Get audio duration for timing
+                    response_data = response.json()
+                    print(f"✅ STT TASK CREATED: {response_data}")
+                    return response_data
+
+            # Get STT result
+            def get_stt(gen_id):
+                url = f"{base_url}/stt/{gen_id}"
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                }
+                response = requests.get(url, headers=headers)
+                return response.json()
+
+            # Intelligent text segmentation
+            def create_segments_from_text(transcript, total_duration):
+                """Split transcript into segments based on sentences and punctuation"""
+                # Split by sentences (periods, exclamation marks, question marks)
+                sentence_endings = re.split(r'([.!?]+)', transcript)
+                sentences = []
+
+                for i in range(0, len(sentence_endings) - 1, 2):
+                    sentence = sentence_endings[i].strip()
+                    punctuation = sentence_endings[i + 1] if i + 1 < len(sentence_endings) else ""
+                    if sentence:
+                        sentences.append(sentence + punctuation)
+
+                # If no sentences found, split by commas or length
+                if len(sentences) <= 1:
+                    # Split by commas
+                    parts = [part.strip() for part in transcript.split(',') if part.strip()]
+                    if len(parts) <= 1:
+                        # Split by word count (max 10 words per segment)
+                        words = transcript.split()
+                        parts = []
+                        for i in range(0, len(words), 10):
+                            parts.append(' '.join(words[i:i+10]))
+                    sentences = parts
+
+                # Create segments with estimated timing
+                segments = []
+                if sentences:
+                    segment_duration = total_duration / len(sentences)
+
+                    for i, sentence in enumerate(sentences):
+                        start_time = i * segment_duration
+                        end_time = min((i + 1) * segment_duration, total_duration)
+
+                        segments.append({
+                            'start_time': start_time,
+                            'end_time': end_time,
+                            'text': sentence.strip()
+                        })
+
+                return segments
+
+            # Main transcription process
+            stt_response = create_stt()
+            gen_id = stt_response.get("generation_id")
+
+            if not gen_id:
+                raise Exception("No generation_id received from API")
+
+            print(f"🔄 POLLING FOR RESULTS: {gen_id}")
+            start_time = time.time()
+            timeout = 600
+
+            while time.time() - start_time < timeout:
+                response_data = get_stt(gen_id)
+
+                if response_data is None:
+                    raise Exception("No response from API")
+
+                status = response_data.get("status")
+
+                if status == "waiting" or status == "active":
+                    print("Still waiting... Checking again in 10 seconds.")
+                    time.sleep(10)
+                else:
+                    if status == "completed":
+                        transcript = response_data["result"]["results"]["channels"][0]["alternatives"][0]["transcript"]
+                        print(f"✅ AIML TRANSCRIPTION SUCCESS!")
+                        print(f"📝 EXTRACTED TEXT: '{transcript}'")
+
+                        # Get audio duration
                         audio_segment = AudioSegment.from_wav(audio_path)
                         duration = len(audio_segment) / 1000
 
-                        speech_segments = [{
-                            'start_time': 0.0,
-                            'end_time': duration,
-                            'text': text
-                        }]
-                        print(f"📊 CREATED SINGLE SEGMENT: 0.0s-{duration:.2f}s")
-                        print(f"💬 TEXT: '{text}'")
+                        # Create intelligent segments
+                        speech_segments = create_segments_from_text(transcript, duration)
+
+                        if speech_segments:
+                            print(f"📊 CREATED {len(speech_segments)} INTELLIGENT SEGMENTS:")
+                            for i, segment in enumerate(speech_segments):
+                                print(f"   🎬 SEGMENT {i+1}: {segment['start_time']:.2f}s-{segment['end_time']:.2f}s")
+                                print(f"       💬 TEXT: '{segment['text']}'")
+                        else:
+                            # Fallback to single segment
+                            speech_segments = [{
+                                'start_time': 0.0,
+                                'end_time': duration,
+                                'text': transcript.strip()
+                            }]
+
+                        return speech_segments
                     else:
-                        raise Exception("No text extracted from audio")
+                        raise Exception(f"Transcription failed with status: {status}")
 
-                print(f"✅ WHISPER TRANSCRIPTION SUCCESS: {len(speech_segments)} segments extracted")
-                return speech_segments
+            # Timeout fallback
+            print("Timeout reached. Creating fallback segment.")
+            audio_segment = AudioSegment.from_wav(audio_path)
+            duration = len(audio_segment) / 1000
 
-            except Exception as transcribe_error:
-                print(f"❌ WHISPER TRANSCRIPTION FAILED: {str(transcribe_error)}")
-                logger.error(f"Whisper transcription error: {str(transcribe_error)}")
+            fallback_segments = [{
+                'start_time': 0.0,
+                'end_time': duration,
+                'text': "Audio content detected - Transcription timeout"
+            }]
 
-                # Get audio duration for fallback
-                try:
-                    audio_segment = AudioSegment.from_wav(audio_path)
-                    duration = len(audio_segment) / 1000
-
-                    fallback_segments = [{
-                        'start_time': 0.0,
-                        'end_time': duration,
-                        'text': "Audio content detected - Whisper transcription failed"
-                    }]
-
-                    print(f"📊 FALLBACK SEGMENT: 0.0s-{duration:.2f}s")
-                    return fallback_segments
-
-                except Exception as final_error:
-                    print(f"❌ FINAL FALLBACK FAILED: {str(final_error)}")
-                    return [{
-                        'start_time': 0.0,
-                        'end_time': 30.0,
-                        'text': "Audio processing completed"
-                    }]
+            return fallback_segments
 
         except Exception as e:
-            print(f"💥 WHISPER EXTRACTION FAILED: {str(e)}")
-            logger.error(f"Whisper extraction error: {str(e)}")
-            raise Exception(f"Failed to extract speech segments with Whisper: {str(e)}")
+            print(f"💥 AIML TRANSCRIPTION FAILED: {str(e)}")
+            logger.error(f"AIML transcription error: {str(e)}")
+
+            # Final fallback
+            try:
+                audio_segment = AudioSegment.from_wav(audio_path)
+                duration = len(audio_segment) / 1000
+
+                fallback_segments = [{
+                    'start_time': 0.0,
+                    'end_time': duration,
+                    'text': "Audio content detected - Transcription failed"
+                }]
+
+                return fallback_segments
+            except:
+                return [{
+                    'start_time': 0.0,
+                    'end_time': 30.0,
+                    'text': "Audio processing completed"
+                }]
