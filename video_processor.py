@@ -5,6 +5,7 @@ import json
 from pydub import AudioSegment
 from pydub.silence import split_on_silence
 import yt_dlp
+import whisper
 
 logger = logging.getLogger(__name__)
 
@@ -70,111 +71,91 @@ class VideoProcessor:
             raise Exception(f"Failed to extract audio: {str(e)}")
 
     def extract_speech_segments(self, audio_path):
-        """Extract speech segments using SpeechRecognition with Google Speech API"""
+        """Extract speech segments using OpenAI Whisper"""
         try:
-            print(f"🎤 STARTING SPEECH EXTRACTION FROM: {audio_path}")
-            logger.info(f"Starting speech recognition on: {audio_path}")
+            print(f"🎤 STARTING WHISPER TRANSCRIPTION FROM: {audio_path}")
+            logger.info(f"Starting Whisper transcription on: {audio_path}")
 
-            # Use SpeechRecognition library for transcription
-            print("🤖 USING SPEECH RECOGNITION: Processing audio...")
-
+            # Load Whisper model
+            print("🤖 LOADING WHISPER MODEL...")
             try:
-                import speech_recognition as sr
+                model = whisper.load_model("base")  # Using base model for balance of speed/accuracy
+                print("✅ WHISPER MODEL LOADED SUCCESSFULLY")
+            except Exception as model_error:
+                print(f"❌ FAILED TO LOAD WHISPER MODEL: {str(model_error)}")
+                raise Exception(f"Failed to load Whisper model: {str(model_error)}")
 
-                # Initialize recognizer
-                recognizer = sr.Recognizer()
+            # Transcribe audio with Whisper
+            print("🎯 STARTING WHISPER TRANSCRIPTION...")
+            try:
+                result = model.transcribe(audio_path, verbose=True)
 
-                # Load the audio file
-                print("📥 Loading audio file...")
-                with sr.AudioFile(audio_path) as source:
-                    # Adjust for ambient noise
-                    recognizer.adjust_for_ambient_noise(source, duration=1)
+                # Extract segments with timing
+                speech_segments = []
 
-                    # Record the audio data
-                    audio_data = recognizer.record(source)
+                if 'segments' in result and result['segments']:
+                    print(f"📊 PROCESSING {len(result['segments'])} WHISPER SEGMENTS:")
+                    for i, segment in enumerate(result['segments']):
+                        start_time = segment.get('start', 0.0)
+                        end_time = segment.get('end', start_time + 1.0)
+                        text = segment.get('text', '').strip()
 
-                # Recognize speech using Google Speech Recognition
-                print("🎯 Starting transcription with Google Speech API...")
-                try:
-                    text = recognizer.recognize_google(audio_data)
-                except AttributeError:
-                    # If recognize_google is not available, use a fallback
-                    print("🔄 Google Speech API not available, using offline recognition...")
-                    text = recognizer.recognize_sphinx(audio_data)
-                except:
-                    # If that also fails, create a fallback
-                    raise Exception("Speech recognition methods not available")
-
-                print(f"✅ SPEECH RECOGNITION SUCCESS!")
-                print(f"📝 EXTRACTED TEXT: '{text}'")
-
-                # Get audio duration for timing
-                audio_segment = AudioSegment.from_wav(audio_path)
-                duration = len(audio_segment) / 1000  # Convert to seconds
-
-                # Create single segment with extracted text
-                speech_segments = [{
-                    'start_time': 0.0,
-                    'end_time': duration,
-                    'text': text.strip()
-                }]
-
-                print(f"📊 CREATED 1 SEGMENT: 0.0s-{duration:.2f}s")
-                print(f"🎯 SPEECH RECOGNITION SUCCESS: 1 segment extracted")
-                return speech_segments
-
-            except Exception as e:
-                print(f"❌ SPEECH RECOGNITION FAILED: {str(e)}")
-                logger.error(f"Speech recognition error: {str(e)}")
-
-                # Get audio duration for timing
-                audio_segment = AudioSegment.from_wav(audio_path)
-                duration = len(audio_segment) / 1000  # Convert to seconds
-
-                # Create appropriate fallback message based on error type
-                if "UnknownValueError" in str(type(e)):
-                    text = "Audio detected but speech could not be recognized"
-                elif "RequestError" in str(type(e)):
-                    text = "Audio detected - Speech recognition service unavailable"
+                        if text:  # Only include non-empty segments
+                            speech_segments.append({
+                                'start_time': start_time,
+                                'end_time': end_time,
+                                'text': text
+                            })
+                            print(f"   🎬 SEGMENT {i+1}: {start_time:.2f}s-{end_time:.2f}s")
+                            print(f"       💬 TEXT: '{text}'")
                 else:
-                    text = "Audio content detected - Speech recognition failed"
+                    # Fallback: use full text as single segment
+                    text = result.get('text', '').strip()
+                    if text:
+                        # Get audio duration for timing
+                        audio_segment = AudioSegment.from_wav(audio_path)
+                        duration = len(audio_segment) / 1000
 
-                speech_segments = [{
-                    'start_time': 0.0,
-                    'end_time': duration,
-                    'text': text
-                }]
+                        speech_segments = [{
+                            'start_time': 0.0,
+                            'end_time': duration,
+                            'text': text
+                        }]
+                        print(f"📊 CREATED SINGLE SEGMENT: 0.0s-{duration:.2f}s")
+                        print(f"💬 TEXT: '{text}'")
+                    else:
+                        raise Exception("No text extracted from audio")
 
-                print(f"📊 FALLBACK SEGMENT: 0.0s-{duration:.2f}s")
+                print(f"✅ WHISPER TRANSCRIPTION SUCCESS: {len(speech_segments)} segments extracted")
                 return speech_segments
 
-            # Final fallback: Create a placeholder segment
-            print("⚠️ SPEECH RECOGNITION FAILED: Creating placeholder segment...")
+            except Exception as transcribe_error:
+                print(f"❌ WHISPER TRANSCRIPTION FAILED: {str(transcribe_error)}")
+                logger.error(f"Whisper transcription error: {str(transcribe_error)}")
 
-            try:
-                # Get audio duration for timing
-                audio_segment = AudioSegment.from_wav(audio_path)
-                duration = len(audio_segment) / 1000  # Convert to seconds
+                # Get audio duration for fallback
+                try:
+                    audio_segment = AudioSegment.from_wav(audio_path)
+                    duration = len(audio_segment) / 1000
 
-                speech_segments = [{
-                    'start_time': 0.0,
-                    'end_time': duration,
-                    'text': "Audio content detected - Speech recognition failed"
-                }]
+                    fallback_segments = [{
+                        'start_time': 0.0,
+                        'end_time': duration,
+                        'text': "Audio content detected - Whisper transcription failed"
+                    }]
 
-                print(f"📊 PLACEHOLDER SEGMENT: 0.0s-{duration:.2f}s")
-                return speech_segments
+                    print(f"📊 FALLBACK SEGMENT: 0.0s-{duration:.2f}s")
+                    return fallback_segments
 
-            except Exception as final_error:
-                print(f"❌ FINAL FALLBACK FAILED: {str(final_error)}")
-                # Create minimal segment
-                return [{
-                    'start_time': 0.0,
-                    'end_time': 30.0,  # Default duration
-                    'text': "Audio processing completed"
-                }]
+                except Exception as final_error:
+                    print(f"❌ FINAL FALLBACK FAILED: {str(final_error)}")
+                    return [{
+                        'start_time': 0.0,
+                        'end_time': 30.0,
+                        'text': "Audio processing completed"
+                    }]
 
         except Exception as e:
-            print(f"💥 SPEECH EXTRACTION FAILED: {str(e)}")
-            logger.error(f"Speech extraction error: {str(e)}")
-            raise Exception(f"Failed to extract speech segments: {str(e)}")
+            print(f"💥 WHISPER EXTRACTION FAILED: {str(e)}")
+            logger.error(f"Whisper extraction error: {str(e)}")
+            raise Exception(f"Failed to extract speech segments with Whisper: {str(e)}")

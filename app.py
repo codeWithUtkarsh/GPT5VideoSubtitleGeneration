@@ -248,4 +248,4 @@ def process_video_from_file(job_id, file_path, source_lang, target_lang, config)
         processing_status[job_id]['message'] = f'Processing failed: {str(e)}'
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=8080, debug=True)
