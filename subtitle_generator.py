@@ -102,7 +102,7 @@ class SubtitleGenerator:
                 end_time = segment['end_time']
                 text = segment['translated_text'].replace("'", "\\'").replace(":", "\\:")
 
-                filter_parts.append(f"drawtext=text='{text}':fontcolor=white:fontsize=24:box=1:boxcolor=black@0.5:boxborderw=5:x=(w-text_w)/2:y=h-th-10:enable='between(t,{start_time},{end_time})'")
+                filter_parts.append(f"drawtext=text='{text}':fontcolor=white:fontsize=18:box=1:boxcolor=black@0.5:boxborderw=3:x=(w-text_w)/2:y=h-th-20:enable='between(t,{start_time},{end_time})'")
 
             if filter_parts:
                 video_filter = ",".join(filter_parts)
