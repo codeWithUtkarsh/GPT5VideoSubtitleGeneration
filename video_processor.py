@@ -80,10 +80,10 @@ class VideoProcessor:
 
             # AIML API configuration
             base_url = "https://api.aimlapi.com/v1"
-            api_key = os.environ.get("AIMLAPI_KEY", "")
+            api_key = os.environ.get("OPENAI_API_KEY", "")
 
             if not api_key:
-                raise Exception("AIMLAPI_KEY environment variable not set")
+                raise Exception("OPENAI_API_KEY environment variable not set")
 
             print("🤖 SENDING AUDIO TO AIML API...")
 
