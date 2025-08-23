@@ -1,11 +1,16 @@
-/* Psychedelic Background */
+/* Psychedelic Background with Fast Loading */
 body {
     margin: 0;
     padding: 0;
     overflow-x: hidden;
-    background: url('/static/images/background.png') center center fixed;
+    /* Fast-loading gradient fallback */
+    background: linear-gradient(135deg, #2D1B69 0%, #11998E 25%, #38EF7D 50%, #FF6B6B 75%, #4ECDC4 100%);
+    /* Optimized image overlay */
+    background-image: url('/static/images/background-optimized.jpg');
+    background-position: center center;
     background-size: cover;
     background-repeat: no-repeat;
+    background-attachment: fixed;
     min-height: 100vh;
     position: relative;
 }
