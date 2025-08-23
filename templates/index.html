@@ -165,23 +165,40 @@
 
                             <!-- Result Card -->
                             <div class="card shadow-lg border-0 d-none" id="resultCard">
-                                <div class="card-body p-5 text-center">
-                                    <h3 class="card-title mb-4">
+                                <div class="card-body p-5">
+                                    <h3 class="card-title text-center mb-4">
                                         <i class="fas fa-check-circle text-success me-2"></i>
                                         Translation Complete!
                                     </h3>
                                     
-                                    <p class="lead mb-4">Your video has been successfully translated and subtitled.</p>
+                                    <p class="lead text-center mb-4">Your video has been successfully translated and subtitled.</p>
                                     
-                                    <div class="d-grid gap-2 d-md-flex justify-content-md-center">
-                                        <button class="btn btn-success btn-lg px-4" id="downloadBtn">
-                                            <i class="fas fa-download me-2"></i>
-                                            Download Video
-                                        </button>
-                                        <button class="btn btn-outline-primary btn-lg px-4" id="newVideoBtn">
-                                            <i class="fas fa-plus me-2"></i>
-                                            Translate Another
-                                        </button>
+                                    <!-- Video Player Section -->
+                                    <div class="mb-4" id="videoPlayerSection">
+                                        <div class="ratio ratio-16x9">
+                                            <video id="processedVideo" controls class="rounded" style="background-color: #000;">
+                                                <source id="videoSource" src="" type="video/mp4">
+                                                Your browser does not support the video tag.
+                                            </video>
+                                        </div>
+                                        <p class="text-center mt-2 text-muted">
+                                            <i class="fas fa-info-circle me-1"></i>
+                                            Your translated video with embedded subtitles
+                                        </p>
+                                    </div>
+                                    
+                                    <!-- Download Options -->
+                                    <div class="text-center">
+                                        <div class="d-grid gap-2 d-md-flex justify-content-md-center">
+                                            <button class="btn btn-success btn-lg px-4" id="downloadBtn">
+                                                <i class="fas fa-download me-2"></i>
+                                                Download Video
+                                            </button>
+                                            <button class="btn btn-outline-primary btn-lg px-4" id="newVideoBtn">
+                                                <i class="fas fa-plus me-2"></i>
+                                                Translate Another
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

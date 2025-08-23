@@ -74,7 +74,7 @@ def upload_video():
             if file.filename == '':
                 return jsonify({'error': 'No video file selected'}), 400
 
-            if file and allowed_file(file.filename):
+            if file and file.filename and allowed_file(file.filename):
                 # Save uploaded file
                 filename = secure_filename(file.filename)
                 file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{job_id}_{filename}")
@@ -144,6 +144,18 @@ def download_video(job_id):
         logger.error(f"Download error: {str(e)}")
         return jsonify({'error': 'Download failed'}), 500
 
+@app.route('/video/<job_id>')
+def stream_video(job_id):
+    try:
+        if job_id in processing_status and processing_status[job_id]['status'] == 'completed':
+            file_path = processing_status[job_id]['file_path']
+            if os.path.exists(file_path):
+                return send_file(file_path, mimetype='video/mp4')
+        return jsonify({'error': 'Video not ready or not found'}), 404
+    except Exception as e:
+        logger.error(f"Video streaming error: {str(e)}")
+        return jsonify({'error': 'Video streaming failed'}), 500
+
 def process_video_from_url(job_id, video_url, source_lang, target_lang, config):
     try:
         processor = VideoProcessor()
@@ -191,6 +203,7 @@ def process_video_from_url(job_id, video_url, source_lang, target_lang, config):
         processing_status[job_id]['message'] = 'Video processed successfully!'
         processing_status[job_id]['progress'] = 100
         processing_status[job_id]['file_path'] = output_path
+        processing_status[job_id]['video_url'] = f'/video/{job_id}'
 
     except Exception as e:
         logger.error(f"Processing error for job {job_id}: {str(e)}")
@@ -241,6 +254,7 @@ def process_video_from_file(job_id, file_path, source_lang, target_lang, config)
         processing_status[job_id]['message'] = 'Video processed successfully!'
         processing_status[job_id]['progress'] = 100
         processing_status[job_id]['file_path'] = output_path
+        processing_status[job_id]['video_url'] = f'/video/{job_id}'
 
     except Exception as e:
         logger.error(f"Processing error for job {job_id}: {str(e)}")

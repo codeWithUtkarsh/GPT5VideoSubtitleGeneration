@@ -231,10 +231,27 @@ class VideoTranslatorApp {
         progressBar.classList.add('progress-bar-animated');
     }
 
-    handleCompletion() {
+    async handleCompletion() {
         if (this.pollInterval) {
             clearInterval(this.pollInterval);
             this.pollInterval = null;
+        }
+
+        // Get the video URL from the server
+        try {
+            const response = await fetch(`/status/${this.currentJobId}`);
+            const status = await response.json();
+            
+            if (status.video_url) {
+                // Set up the video player
+                const videoSource = document.getElementById('videoSource');
+                const processedVideo = document.getElementById('processedVideo');
+                
+                videoSource.src = status.video_url;
+                processedVideo.load(); // Reload the video element with new source
+            }
+        } catch (error) {
+            console.error('Error loading video:', error);
         }
 
         document.getElementById('progressCard').classList.add('d-none');
