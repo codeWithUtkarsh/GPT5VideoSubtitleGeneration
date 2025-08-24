@@ -118,9 +118,10 @@ class VideoProcessor:
                 response = requests.get(url, headers=headers)
                 return response.json()
 
-            # Intelligent text segmentation
+            # Intelligent text segmentation with robust timing algorithm
             def create_segments_from_text(transcript, total_duration):
-                """Split transcript into segments based on sentences and punctuation"""
+                """Split transcript into segments with intelligent timing based on text analysis"""
+
                 # Split by sentences (periods, exclamation marks, question marks)
                 sentence_endings = re.split(r'([.!?]+)', transcript)
                 sentences = []
@@ -136,27 +137,82 @@ class VideoProcessor:
                     # Split by commas
                     parts = [part.strip() for part in transcript.split(',') if part.strip()]
                     if len(parts) <= 1:
-                        # Split by word count (max 10 words per segment)
+                        # Split by word count (3-4 words per segment for better alignment)
                         words = transcript.split()
                         parts = []
-                        for i in range(0, len(words), 10):
-                            parts.append(' '.join(words[i:i+10]))
+                        for i in range(0, len(words), 4):
+                            chunk = words[i:i+4]
+                            parts.append(' '.join(chunk))
                     sentences = parts
 
-                # Create segments with estimated timing
+                # Calculate timing based on text analysis
                 segments = []
                 if sentences:
-                    segment_duration = total_duration / len(sentences)
+                    # Calculate relative weights for each sentence based on multiple factors
+                    sentence_weights = []
 
-                    for i, sentence in enumerate(sentences):
-                        start_time = i * segment_duration
-                        end_time = min((i + 1) * segment_duration, total_duration)
+                    for sentence in sentences:
+                        # Base weight on character count (primary factor)
+                        char_weight = len(sentence.strip())
+
+                        # Adjust for word count (more words = slightly more time)
+                        word_count = len(sentence.split())
+                        word_weight = word_count * 0.5
+
+                        # Adjust for punctuation complexity
+                        punctuation_weight = 0
+                        if ',' in sentence:
+                            punctuation_weight += sentence.count(',') * 0.3  # Commas add pause time
+                        if any(p in sentence for p in ['.', '!', '?']):
+                            punctuation_weight += 0.5  # End punctuation adds pause
+                        if ':' in sentence or ';' in sentence:
+                            punctuation_weight += 0.4  # Complex punctuation adds pause
+
+                        # Calculate final weight
+                        total_weight = char_weight + word_weight + punctuation_weight
+                        sentence_weights.append(max(total_weight, 1.0))  # Minimum weight of 1
+
+                    # Calculate total weight and reserve time for pauses
+                    total_weight = sum(sentence_weights)
+                    pause_time_total = min(total_duration * 0.15, len(sentences) * 0.3)  # 15% for pauses, max 0.3s per segment
+                    speaking_time = total_duration - pause_time_total
+                    pause_per_segment = pause_time_total / len(sentences) if len(sentences) > 1 else 0
+
+                    # Create segments with proportional timing
+                    current_time = 0
+
+                    for i, (sentence, weight) in enumerate(zip(sentences, sentence_weights)):
+                        # Calculate duration based on weight proportion
+                        segment_speaking_time = (weight / total_weight) * speaking_time
+
+                        # Minimum segment duration
+                        min_duration = 1.0
+                        segment_speaking_time = max(segment_speaking_time, min_duration)
+
+                        # Add pause time (except for the last segment)
+                        if i < len(sentences) - 1:
+                            segment_total_time = segment_speaking_time + pause_per_segment
+                        else:
+                            segment_total_time = segment_speaking_time
+
+                        start_time = current_time
+                        end_time = min(current_time + segment_total_time, total_duration)
+
+                        # Ensure we don't exceed total duration
+                        if i == len(sentences) - 1:
+                            end_time = total_duration
 
                         segments.append({
                             'start_time': start_time,
                             'end_time': end_time,
                             'text': sentence.strip()
                         })
+
+                        current_time = end_time
+
+                    # Final adjustment to ensure segments fill the entire duration
+                    if segments and segments[-1]['end_time'] < total_duration:
+                        segments[-1]['end_time'] = total_duration
 
                 return segments
 
